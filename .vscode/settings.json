@@ -1,6 +1,7 @@
 {
     "files.associations": {
         "main": "c",
-        "stdbool.h": "c"
+        "stdbool.h": "c",
+        "leif.h": "c"
     }
 }
