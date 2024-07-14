@@ -4,6 +4,7 @@
 #include <leif/leif.h>
 
 #include <stdio.h>
+#include <string.h>
 
 
 #include "config.h"
@@ -45,7 +46,51 @@ static uint32_t numEntries = 0;
 static LfTexture removeTexture, backTexture;
 
 static LfInputField new_task_input;
-static char new_task_input_buf[512];
+static char new_task_input_buf[INPUT_BUF_SIZE];
+
+static int32_t selected_priority = -1;
+
+char* get_command_output(const char* cmd) {
+    FILE *fp;
+    char buffer[1024];
+    char *result = NULL;
+    size_t result_size = 0;
+
+    // Opening a new pipe with the fiven command
+    fp = popen(cmd, "r");
+    if (fp == NULL) {
+        printf("Failed to run command\n");
+        return NULL;
+    }
+
+    // Reading the output
+    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+        size_t buffer_len = strlen(buffer);
+        char *temp = realloc(result, result_size + buffer_len + 1);
+        if (temp == NULL) {
+            printf("Memory allocation failed\n");
+            free(result);
+            pclose(fp);
+            return NULL;
+        }
+        result = temp;
+        strcpy(result + result_size, buffer);
+        result_size += buffer_len;
+    }
+    pclose(fp);
+    return result;
+}
+
+static int compare_entry_priority(const void* a, const void* b)
+{
+    todo_entry* entry_a = *(todo_entry**)a;
+    todo_entry* entry_b = *(todo_entry**)b;
+    return (entry_b->priority - entry_a->priority);
+}
+
+static void sort_entries_by_priority(todo_entry** entries){
+    qsort(entries, numEntries, sizeof(todo_entry*), compare_entry_priority);
+}
 
 static void rendertopbar() {
     lf_push_font(&titlefont);
@@ -137,6 +182,17 @@ static void renderentries()
         float ptry_before = lf_get_ptr_y();
         lf_set_ptr_y_absolute(lf_get_ptr_y() + 5.0f);
         lf_set_ptr_x_absolute(lf_get_ptr_x() + 5.0f);
+
+        bool clicked_priority = lf_hovered((vec2s){lf_get_ptr_x(), lf_get_ptr_y()}, (vec2s){priority_size, priority_size}) && lf_mouse_button_went_down(GLFW_MOUSE_BUTTON_LEFT);
+
+        if(clicked_priority){
+            if(entry->priority + 1 >= PRIORITY_HIGH + 1){
+                entry->priority = 0;
+            } else {
+                entry->priority++;
+            }
+            sort_entries_by_priority(entries);
+        }
         switch (entry->priority)
         {
             case PRIORITY_LOW:{
@@ -230,9 +286,106 @@ static void rendernewtask(){
 
     {
         lf_push_font(&smallfont);
+        lf_text("Description");
+        lf_pop_font();
 
+        lf_next_line();
+        LfUIElementProps props = lf_get_theme().inputfield_props;
+        props.padding = 15.0f;
+        props.border_width = 1.0f;
+        props.color = lf_color_from_zto((vec4s){0.05f, 0.05f, 0.05f, 1.0f});
+        props.corner_radius = 11;
+        props.text_color = LF_WHITE;
+        props.border_color = new_task_input.selected ? LF_WHITE : (LfColor){170, 170, 170, 255};
+        props.corner_radius = 2.5f;
+        props.margin_bottom = 10.0f;
+        lf_push_style_props(props);
+        lf_input_text(&new_task_input);
+        lf_pop_style_props();
     }
 
+    lf_next_line();
+
+    
+    {
+        lf_push_font(&smallfont);
+        lf_text("Priority");
+        lf_pop_font();
+
+        lf_next_line();
+        static const char* items [3] = {
+            "Low",
+            "Medium",
+            "High"
+        };
+        static bool opened = false;
+        LfUIElementProps props = lf_get_theme().button_props;
+        props.color = (LfColor){70, 70, 70, 255};
+        props.text_color = LF_WHITE;
+        props.border_width = 0.0f;
+        props.corner_radius = 5.0f;
+        lf_push_style_props(props);
+        lf_dropdown_menu(items, "Priority", 3, 200, 80, &selected_priority, &opened);
+        lf_pop_style_props();
+    }
+
+    {
+        bool form_complete = (strlen(new_task_input_buf) && selected_priority != -1);
+        const char* text = "Add";
+        const float width = 150.0f;
+
+        LfUIElementProps props = lf_get_theme().button_props;
+        props.margin_left = 0.0f;
+        props.margin_right = 0.0f;
+        props.corner_radius = 5.0f;
+        props.border_width = 0.0f;
+        props.color = !form_complete ? (LfColor){80, 80, 80, 255} : (LfColor){65, 167, 204, 255};
+        lf_push_style_props(props);
+        lf_set_line_should_overflow(false);
+        lf_set_ptr_x_absolute(WIN_INIT_W - (width + props.padding * 2.0f) - GLOBAL_MARGIN);
+        lf_set_ptr_y_absolute(WIN_INIT_H - (lf_button_dimension(text).y + props.padding * 2.0f) - GLOBAL_MARGIN);
+        if(lf_button_fixed(text, width, -1) == LF_CLICKED && form_complete)
+        {
+            todo_entry* entry = (todo_entry*)malloc(sizeof(*entry));
+            entry->priority = selected_priority;
+            entry->completed = false;
+            entry->date = get_command_output("date +\"%d.%m.%Y, %H:%M\"");
+
+            char* new_desc = malloc(strlen(new_task_input_buf));
+            strcpy(new_desc, new_task_input_buf);
+
+            entry->desc = new_desc;  
+            entries[numEntries++] = entry;
+            memset(new_task_input_buf, 0, 512);
+            sort_entries_by_priority(entries);
+        }
+        lf_set_line_should_overflow(true);
+        lf_pop_style_props();
+    }
+
+    lf_next_line();
+
+    {
+        LfUIElementProps props = lf_get_theme().button_props;
+        props.color = LF_NO_COLOR;
+        props.border_width = 0.0f;
+        props.padding = 0.0f;
+        props.margin_left = 0.0f;
+        props.margin_top = 0.0f;
+        props.margin_right = 0.0f;
+        props.margin_bottom = 0.0f;
+        lf_push_style_props(props);
+        lf_set_line_should_overflow(false);
+        LfTexture backButton = (LfTexture){.id = backTexture.id, .width = 20, .height = 40};
+        lf_set_ptr_y_absolute(WIN_INIT_H - backButton.height - GLOBAL_MARGIN * 2.0f);
+        lf_set_ptr_x_absolute(GLOBAL_MARGIN);
+
+        if(lf_image_button(backButton) == LF_CLICKED){
+            current_tab = TAB_DASHBOARD;
+        }
+        lf_set_line_should_overflow(true);
+        lf_pop_style_props();
+    }
 }
 
 int main(int argc, char **argv) 
@@ -254,15 +407,14 @@ int main(int argc, char **argv)
     removeTexture = lf_load_texture("./icons/remove.png", true, LF_TEX_FILTER_LINEAR);
     backTexture = lf_load_texture("./icons/back.png", true, LF_TEX_FILTER_LINEAR);
 
-    for(uint32_t i = 0; i< 5; i++){
+    memset(new_task_input_buf, 0, INPUT_BUF_SIZE);
+    new_task_input = (LfInputField){
+        .width = 400,
+        .buf = new_task_input_buf,
+        .buf_size = INPUT_BUF_SIZE,
+        .placeholder = "What is there to do?"
+    };
 
-    todo_entry* entry = (todo_entry*)malloc(sizeof(*entry));
-    entry->priority = PRIORITY_MEDIUM;
-    entry->completed = false;
-    entry->date = "nothing";
-    entry->desc = "Comprarle un pancho a pancho";
-    entries[numEntries++] = entry;
-    }
 
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT);
