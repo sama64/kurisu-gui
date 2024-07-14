@@ -11,12 +11,16 @@
                 "${file}",
                 "-o",
                 "${fileDirname}/${fileBasenameNoExtension}",
+                "-I/usr/local/include/cjson",  // Incluir directorio de encabezados de cJSON
+                "-L/usr/local/lib",            // Enlazar directorio de bibliotecas
+                "-Wl,-rpath,/usr/local/lib",   // Configurar RPATH
                 "-lGL",
                 "-lglfw",
                 "-lleif",
                 "-lclipboard",
                 "-lxcb",
-                "-lm"
+                "-lm",
+                "-lcjson"
             ],
             "options": {
                 "cwd": "${fileDirname}"

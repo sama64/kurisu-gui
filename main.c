@@ -2,6 +2,7 @@
 #include <GL/gl.h>
 #include <GLFW/glfw3.h>
 #include <leif/leif.h>
+#include <cjson/cJSON.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -49,6 +50,67 @@ static LfInputField new_task_input;
 static char new_task_input_buf[INPUT_BUF_SIZE];
 
 static int32_t selected_priority = -1;
+
+
+void save_entries_to_json(const char *filename) {
+    cJSON *json_entries = cJSON_CreateArray();
+    for (uint32_t i = 0; i < numEntries; i++) {
+        cJSON *entry = cJSON_CreateObject();
+        cJSON_AddBoolToObject(entry, "completed", entries[i]->completed);
+        cJSON_AddStringToObject(entry, "desc", entries[i]->desc);
+        cJSON_AddStringToObject(entry, "date", entries[i]->date);
+        cJSON_AddNumberToObject(entry, "priority", entries[i]->priority);
+        cJSON_AddItemToArray(json_entries, entry);
+    }
+
+    char *string = cJSON_Print(json_entries);
+    FILE *file = fopen(filename, "w");
+    if (file) {
+        fputs(string, file);
+        fclose(file);
+    }
+
+    cJSON_Delete(json_entries);
+    free(string);
+}
+
+
+void load_entries_from_json(const char *filename) {
+    FILE *file = fopen(filename, "r");
+    if (!file) return;
+
+    fseek(file, 0, SEEK_END);
+    long length = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    char *data = malloc(length + 1);
+    fread(data, 1, length, file);
+    fclose(file);
+
+    data[length] = '\0';
+
+    cJSON *json_entries = cJSON_Parse(data);
+    if (!cJSON_IsArray(json_entries)) {
+        cJSON_Delete(json_entries);
+        free(data);
+        return;
+    }
+
+    numEntries = cJSON_GetArraySize(json_entries);
+    for (uint32_t i = 0; i < numEntries; i++) {
+        cJSON *json_entry = cJSON_GetArrayItem(json_entries, i);
+        todo_entry *entry = malloc(sizeof(todo_entry));
+        entry->completed = cJSON_IsTrue(cJSON_GetObjectItem(json_entry, "completed"));
+        entry->desc = strdup(cJSON_GetObjectItem(json_entry, "desc")->valuestring);
+        entry->date = strdup(cJSON_GetObjectItem(json_entry, "date")->valuestring);
+        entry->priority = cJSON_GetObjectItem(json_entry, "priority")->valueint;
+        entries[i] = entry;
+    }
+
+    cJSON_Delete(json_entries);
+    free(data);
+}
+
+
 
 char* get_command_output(const char* cmd) {
     FILE *fp;
@@ -164,9 +226,11 @@ static void renderfilters() {
 }
 
 static void renderentries()
-{
+{ 
 
     lf_div_begin(((vec2s){lf_get_ptr_x(), lf_get_ptr_y()}), ((vec2s){WIN_INIT_W - lf_get_ptr_x() - GLOBAL_MARGIN, WIN_INIT_H - lf_get_ptr_y() - GLOBAL_MARGIN}), true);
+
+    
 
     uint32_t renderedcount = 0;
 
@@ -344,7 +408,7 @@ static void rendernewtask(){
         lf_set_line_should_overflow(false);
         lf_set_ptr_x_absolute(WIN_INIT_W - (width + props.padding * 2.0f) - GLOBAL_MARGIN);
         lf_set_ptr_y_absolute(WIN_INIT_H - (lf_button_dimension(text).y + props.padding * 2.0f) - GLOBAL_MARGIN);
-        if(lf_button_fixed(text, width, -1) == LF_CLICKED && form_complete)
+        if(lf_button_fixed(text, width, -1) == LF_CLICKED || lf_key_went_down(GLFW_KEY_ENTER) && form_complete)
         {
             todo_entry* entry = (todo_entry*)malloc(sizeof(*entry));
             entry->priority = selected_priority;
@@ -357,6 +421,8 @@ static void rendernewtask(){
             entry->desc = new_desc;  
             entries[numEntries++] = entry;
             memset(new_task_input_buf, 0, 512);
+            new_task_input.cursor_index = 0;
+            lf_input_field_unselect_all(&new_task_input);
             sort_entries_by_priority(entries);
         }
         lf_set_line_should_overflow(true);
@@ -390,6 +456,7 @@ static void rendernewtask(){
 
 int main(int argc, char **argv) 
 {
+    load_entries_from_json("todo_tasks.json");
     glfwInit();
     GLFWwindow* window = glfwCreateWindow(WIN_INIT_W, WIN_INIT_H, "Todo", NULL, NULL);
 
@@ -399,6 +466,7 @@ int main(int argc, char **argv)
 
     LfTheme theme = lf_get_theme();
     theme.div_props.color = LF_NO_COLOR;
+    theme.scrollbar_props.corner_radius = 2;
     lf_set_theme(theme);
 
     titlefont = lf_load_font("./fonts/inter-bold.ttf", 40);
@@ -436,7 +504,6 @@ int main(int argc, char **argv)
 
             case TAB_NEW_TASK:{
                 rendernewtask();
-                break;
             }
 
         }
@@ -447,6 +514,8 @@ int main(int argc, char **argv)
         glfwPollEvents();
         glfwSwapBuffers(window);
     }
+
+    save_entries_to_json("todo_tasks.json");
 
     lf_free_font(&titlefont);
     glfwDestroyWindow(window);
