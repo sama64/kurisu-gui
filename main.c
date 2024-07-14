@@ -230,9 +230,8 @@ static void renderentries()
 
     lf_div_begin(((vec2s){lf_get_ptr_x(), lf_get_ptr_y()}), ((vec2s){WIN_INIT_W - lf_get_ptr_x() - GLOBAL_MARGIN, WIN_INIT_H - lf_get_ptr_y() - GLOBAL_MARGIN}), true);
 
-    
-
     uint32_t renderedcount = 0;
+    float start_x = lf_get_ptr_x();
 
     for (uint32_t i = 0; i < numEntries; i++)
     {
@@ -242,6 +241,7 @@ static void renderentries()
         if(current_filter == FILTER_HIGH && entry->priority != PRIORITY_HIGH) continue;
         if(current_filter == FILTER_COMPLETED && !entry->completed) continue;
         if(current_filter == FILTER_IN_PROGRESS && entry->completed) continue;
+        lf_set_ptr_x_absolute(start_x);
         float priority_size = 15.0f;
         float ptry_before = lf_get_ptr_y();
         lf_set_ptr_y_absolute(lf_get_ptr_y() + 5.0f);
@@ -337,6 +337,9 @@ static void renderentries()
 }
 
 static void rendernewtask(){
+    glClear(GL_COLOR_BUFFER_BIT);
+    glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
+
     lf_push_font(&titlefont);
     {
         LfUIElementProps props = lf_get_theme().text_props;
@@ -357,7 +360,7 @@ static void rendernewtask(){
         LfUIElementProps props = lf_get_theme().inputfield_props;
         props.padding = 15.0f;
         props.border_width = 1.0f;
-        props.color = lf_color_from_zto((vec4s){0.05f, 0.05f, 0.05f, 1.0f});
+        props.color = BACKGROUND_COLOR;
         props.corner_radius = 11;
         props.text_color = LF_WHITE;
         props.border_color = new_task_input.selected ? LF_WHITE : (LfColor){170, 170, 170, 255};
@@ -384,7 +387,7 @@ static void rendernewtask(){
         };
         static bool opened = false;
         LfUIElementProps props = lf_get_theme().button_props;
-        props.color = (LfColor){70, 70, 70, 255};
+        props.color = (LfColor){40, 40, 40, 255};
         props.text_color = LF_WHITE;
         props.border_width = 0.0f;
         props.corner_radius = 5.0f;
@@ -463,12 +466,6 @@ int main(int argc, char **argv)
     glfwMakeContextCurrent(window);
 
     lf_init_glfw(WIN_INIT_W, WIN_INIT_H, window);
-
-    LfTheme theme = lf_get_theme();
-    theme.div_props.color = LF_NO_COLOR;
-    theme.scrollbar_props.corner_radius = 2;
-    lf_set_theme(theme);
-
     titlefont = lf_load_font("./fonts/inter-bold.ttf", 40);
     smallfont = lf_load_font("./fonts/inter.ttf", 20);
 
@@ -489,7 +486,7 @@ int main(int argc, char **argv)
         glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
 
         lf_begin();
-
+        
         lf_div_begin(((vec2s){GLOBAL_MARGIN, GLOBAL_MARGIN}), ((vec2s){WIN_INIT_W - GLOBAL_MARGIN * 2.0f, WIN_INIT_H - GLOBAL_MARGIN * 2.0f}), true);
 
         switch(current_tab){
@@ -501,7 +498,7 @@ int main(int argc, char **argv)
                 renderentries();
                 break;
             }
-
+            
             case TAB_NEW_TASK:{
                 rendernewtask();
             }
