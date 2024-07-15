@@ -15,33 +15,34 @@ typedef enum{
     TAB_NEW_TASK
 } gui_tab;
 
-
 typedef enum {
-  FILTER_ALL = 0,
-  FILTER_IN_PROGRESS,
-  FILTER_COMPLETED,
-  FILTER_LOW,
-  FILTER_MEDIUM,
-  FILTER_HIGH
+    FILTER_ALL = 0,
+    FILTER_IN_PROGRESS,
+    FILTER_COMPLETED,
+    FILTER_LOW,
+    FILTER_MEDIUM,
+    FILTER_HIGH
 } todo_filter;
 
 typedef enum {
-  PRIORITY_LOW = 0,
-  PRIORITY_MEDIUM,
-  PRIORITY_HIGH
+    PRIORITY_LOW = 0,
+    PRIORITY_MEDIUM,
+    PRIORITY_HIGH
 } entry_priority;
 
 typedef struct {
-  bool completed;
-  char* desc, *date;
-  entry_priority priority;
+    bool completed;
+    char* desc, *date;
+    entry_priority priority;
+    bool editing;
+    LfInputField edit_input;
 } todo_entry;
 
 static LfFont titlefont, smallfont;
 static todo_filter current_filter;
 static gui_tab current_tab;
 
-static todo_entry* entries[1024];
+static todo_entry* entries[MAX_ENTRIES];
 static uint32_t numEntries = 0;
 
 static LfTexture removeTexture, backTexture;
@@ -50,6 +51,7 @@ static LfInputField new_task_input;
 static char new_task_input_buf[INPUT_BUF_SIZE];
 
 static int32_t selected_priority = -1;
+
 
 
 void save_entries_to_json(const char *filename) {
@@ -114,7 +116,7 @@ void load_entries_from_json(const char *filename) {
 
 char* get_command_output(const char* cmd) {
     FILE *fp;
-    char buffer[1024];
+    char buffer[INPUT_BUF_SIZE];
     char *result = NULL;
     size_t result_size = 0;
 
@@ -227,7 +229,6 @@ static void renderfilters() {
 
 static void renderentries()
 { 
-
     lf_div_begin(((vec2s){lf_get_ptr_x(), lf_get_ptr_y()}), ((vec2s){WIN_INIT_W - lf_get_ptr_x() - GLOBAL_MARGIN, WIN_INIT_H - lf_get_ptr_y() - GLOBAL_MARGIN}), true);
 
     uint32_t renderedcount = 0;
@@ -307,6 +308,7 @@ static void renderentries()
             }
             lf_pop_style_props();
         }
+
         lf_push_font(&smallfont);
         LfUIElementProps props = lf_get_theme().text_props;
         props.margin_top = 0.0f;
@@ -314,10 +316,47 @@ static void renderentries()
         lf_push_style_props(props);
 
         float descprt_x = lf_get_ptr_x();
-        lf_text(entry->desc);
+        float descprt_y = lf_get_ptr_y();
+        
+        if (entry->editing) {
+            LfUIElementProps input_props = lf_get_theme().inputfield_props;
+            input_props.padding = 5.0f;
+            input_props.border_width = 1.0f;
+            input_props.color = BACKGROUND_COLOR;
+            input_props.corner_radius = 2.5f;
+            input_props.text_color = LF_WHITE;
+            input_props.border_color = entry->edit_input.selected ? LF_WHITE : (LfColor){170, 170, 170, 255};
+            input_props.margin_top = 0.0f;
+            lf_push_style_props(input_props);
+            
+            lf_set_ptr_x_absolute(descprt_x);
+            lf_set_ptr_y_absolute(descprt_y);
+            
+            entry->edit_input.width = WIN_INIT_W - descprt_x - GLOBAL_MARGIN * 2;
+            
+            lf_input_text(&entry->edit_input);
+            lf_pop_style_props();
 
+            if (lf_key_went_down(GLFW_KEY_ENTER)) {
+                entry->editing = false;
+                // Allocate new memory for the updated description
+                free(entry->desc);
+                entry->desc = strdup(entry->edit_input.buf);
+            } else if (lf_key_went_down(GLFW_KEY_ESCAPE)) {
+                entry->editing = false;
+                strcpy(entry->edit_input.buf, entry->desc);  // Restore original text
+            }
+        } else {
+            if (lf_button(entry->desc) == LF_CLICKED) {
+                entry->editing = true;
+                strcpy(entry->edit_input.buf, entry->desc);
+                entry->edit_input.cursor_index = strlen(entry->desc);
+            }
+        }
+
+        // Render the date
         lf_set_ptr_x_absolute(descprt_x);
-        lf_set_ptr_y_absolute(lf_get_ptr_y() + smallfont.font_size);
+        lf_set_ptr_y_absolute(descprt_y + smallfont.font_size + 5.0f);
         props.text_color = (LfColor){150, 150, 150, 255};
         lf_push_style_props(props);
         lf_text(entry->date);
@@ -325,6 +364,7 @@ static void renderentries()
         lf_pop_font();
 
         lf_next_line();
+        lf_set_ptr_y_absolute(lf_get_ptr_y() + 10.0f);
         
         renderedcount++;
     } 
@@ -333,12 +373,12 @@ static void renderentries()
         lf_text("There is no task here.");
     }
     lf_div_end();
-         
 }
 
+
+
 static void rendernewtask(){
-    glClear(GL_COLOR_BUFFER_BIT);
-    glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
+    
 
     lf_push_font(&titlefont);
     {
@@ -346,8 +386,9 @@ static void rendernewtask(){
         props.margin_bottom = 15.0f;
         lf_push_style_props(props);
         lf_text("Add new task");
-        lf_pop_font();
+        lf_pop_style_props();
     }
+    lf_pop_font();
 
     lf_next_line();
 
@@ -387,7 +428,7 @@ static void rendernewtask(){
         };
         static bool opened = false;
         LfUIElementProps props = lf_get_theme().button_props;
-        props.color = (LfColor){40, 40, 40, 255};
+        props.color = BACKGROUND_COLOR;
         props.text_color = LF_WHITE;
         props.border_width = 0.0f;
         props.corner_radius = 5.0f;
@@ -423,7 +464,7 @@ static void rendernewtask(){
 
             entry->desc = new_desc;  
             entries[numEntries++] = entry;
-            memset(new_task_input_buf, 0, 512);
+            memset(new_task_input_buf, 0, INPUT_BUF_SIZE);
             new_task_input.cursor_index = 0;
             lf_input_field_unselect_all(&new_task_input);
             sort_entries_by_priority(entries);
@@ -471,7 +512,7 @@ int main(int argc, char **argv)
 
     removeTexture = lf_load_texture("./icons/remove.png", true, LF_TEX_FILTER_LINEAR);
     backTexture = lf_load_texture("./icons/back.png", true, LF_TEX_FILTER_LINEAR);
-
+    
     memset(new_task_input_buf, 0, INPUT_BUF_SIZE);
     new_task_input = (LfInputField){
         .width = 400,
@@ -480,10 +521,21 @@ int main(int argc, char **argv)
         .placeholder = "What is there to do?"
     };
 
+    // Initialize edit input fields for existing entries
+    for (uint32_t i = 0; i < numEntries; i++) {
+        entries[i]->edit_input = (LfInputField){
+            .width = 400,
+            .buf = malloc(INPUT_BUF_SIZE),
+            .buf_size = INPUT_BUF_SIZE,
+            .placeholder = "Edit description"
+        };
+        strcpy(entries[i]->edit_input.buf, entries[i]->desc);
+    }
 
     while (!glfwWindowShouldClose(window)) {
-        glClear(GL_COLOR_BUFFER_BIT);
+        // Move these lines here to ensure proper clearing of the entire window
         glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
 
         lf_begin();
         
@@ -501,8 +553,8 @@ int main(int argc, char **argv)
             
             case TAB_NEW_TASK:{
                 rendernewtask();
+                break;
             }
-
         }
 
         lf_div_end();
@@ -513,6 +565,11 @@ int main(int argc, char **argv)
     }
 
     save_entries_to_json("todo_tasks.json");
+
+    // Free memory for edit input fields
+    for (uint32_t i = 0; i < numEntries; i++) {
+        free(entries[i]->edit_input.buf);
+    }
 
     lf_free_font(&titlefont);
     glfwDestroyWindow(window);

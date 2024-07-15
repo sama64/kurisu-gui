@@ -5,7 +5,7 @@
 
 #define GLOBAL_MARGIN 25.0f
 
-#define INPUT_BUF_SIZE 512
+#define INPUT_BUF_SIZE 1024
 
 #define SECONDARY_COLOR (LfColor){65, 167, 204, 255} 
 
@@ -14,3 +14,7 @@
 #define DA_INIT_CAP 64 
 
 #define SMOOTH_SCROLL false
+
+#define MAX_ENTRIES (INPUT_BUF_SIZE / 4)
+#define MAX_DESC_LENGTH (INPUT_BUF_SIZE / 2)
+#define MAX_DATE_LENGTH (INPUT_BUF_SIZE / 16)
