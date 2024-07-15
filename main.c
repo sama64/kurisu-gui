@@ -6,16 +6,18 @@
 
 #include <stdio.h>
 #include <string.h>
-
+#include <stdlib.h>
 
 #include "config.h"
 
-typedef enum{
+typedef enum
+{
     TAB_DASHBOARD = 0,
     TAB_NEW_TASK
 } gui_tab;
 
-typedef enum {
+typedef enum
+{
     FILTER_ALL = 0,
     FILTER_IN_PROGRESS,
     FILTER_COMPLETED,
@@ -24,15 +26,18 @@ typedef enum {
     FILTER_HIGH
 } todo_filter;
 
-typedef enum {
+typedef enum
+{
     PRIORITY_LOW = 0,
     PRIORITY_MEDIUM,
     PRIORITY_HIGH
 } entry_priority;
 
-typedef struct {
+typedef struct
+{
     bool completed;
-    char* desc, *date;
+    char *desc;
+    char *date;
     entry_priority priority;
     bool editing;
     LfInputField edit_input;
@@ -42,7 +47,7 @@ static LfFont titlefont, smallfont;
 static todo_filter current_filter;
 static gui_tab current_tab;
 
-static todo_entry* entries[MAX_ENTRIES];
+static todo_entry *entries[MAX_ENTRIES];
 static uint32_t numEntries = 0;
 
 static LfTexture removeTexture, backTexture;
@@ -52,11 +57,68 @@ static char new_task_input_buf[INPUT_BUF_SIZE];
 
 static int32_t selected_priority = -1;
 
+// Function declarations
+static void toggle_entry_edit_mode(todo_entry *entry);
+static void handle_entry_edit(todo_entry *entry);
+static void save_entries_to_json(const char *filename);
+static void load_entries_from_json(const char *filename);
+static void sort_entries_by_priority(todo_entry **entries);
 
+static void toggle_entry_edit_mode(todo_entry *entry)
+{
+    entry->editing = !entry->editing;
+    if (entry->editing)
+    {
+        strcpy(entry->edit_input.buf, entry->desc);
+        entry->edit_input.cursor_index = strlen(entry->desc);
+    }
+}
 
-void save_entries_to_json(const char *filename) {
+static void handle_entry_edit(todo_entry *entry)
+{
+    if (entry->editing && entry->edit_input.buf != NULL)
+    {
+        LfUIElementProps input_props = lf_get_theme().inputfield_props;
+        input_props.padding = 5.0f;
+        input_props.border_width = 1.0f;
+        input_props.color = BACKGROUND_COLOR;
+        input_props.corner_radius = 2.5f;
+        input_props.text_color = LF_WHITE;
+        input_props.border_color = entry->edit_input.selected ? LF_WHITE : (LfColor){170, 170, 170, 255};
+        input_props.margin_top = 0.0f;
+        lf_push_style_props(input_props);
+
+        entry->edit_input.width = WIN_INIT_W - lf_get_ptr_x() - GLOBAL_MARGIN * 2;
+
+        lf_input_text(&entry->edit_input);
+        lf_pop_style_props();
+
+        if (lf_key_went_down(GLFW_KEY_ENTER))
+        {
+            entry->editing = false;
+            free(entry->desc);
+            entry->desc = strdup(entry->edit_input.buf);
+        }
+        else if (lf_key_went_down(GLFW_KEY_ESCAPE))
+        {
+            entry->editing = false;
+            strcpy(entry->edit_input.buf, entry->desc); // Restore original text
+        }
+    }
+    else
+    {
+        if (lf_button(entry->desc) == LF_CLICKED)
+        {
+            toggle_entry_edit_mode(entry);
+        }
+    }
+}
+
+void save_entries_to_json(const char *filename)
+{
     cJSON *json_entries = cJSON_CreateArray();
-    for (uint32_t i = 0; i < numEntries; i++) {
+    for (uint32_t i = 0; i < numEntries; i++)
+    {
         cJSON *entry = cJSON_CreateObject();
         cJSON_AddBoolToObject(entry, "completed", entries[i]->completed);
         cJSON_AddStringToObject(entry, "desc", entries[i]->desc);
@@ -67,7 +129,8 @@ void save_entries_to_json(const char *filename) {
 
     char *string = cJSON_Print(json_entries);
     FILE *file = fopen(filename, "w");
-    if (file) {
+    if (file)
+    {
         fputs(string, file);
         fclose(file);
     }
@@ -76,10 +139,11 @@ void save_entries_to_json(const char *filename) {
     free(string);
 }
 
-
-void load_entries_from_json(const char *filename) {
+void load_entries_from_json(const char *filename)
+{
     FILE *file = fopen(filename, "r");
-    if (!file) return;
+    if (!file)
+        return;
 
     fseek(file, 0, SEEK_END);
     long length = ftell(file);
@@ -91,20 +155,29 @@ void load_entries_from_json(const char *filename) {
     data[length] = '\0';
 
     cJSON *json_entries = cJSON_Parse(data);
-    if (!cJSON_IsArray(json_entries)) {
+    if (!cJSON_IsArray(json_entries))
+    {
         cJSON_Delete(json_entries);
         free(data);
         return;
     }
 
     numEntries = cJSON_GetArraySize(json_entries);
-    for (uint32_t i = 0; i < numEntries; i++) {
+    for (uint32_t i = 0; i < numEntries; i++)
+    {
         cJSON *json_entry = cJSON_GetArrayItem(json_entries, i);
         todo_entry *entry = malloc(sizeof(todo_entry));
         entry->completed = cJSON_IsTrue(cJSON_GetObjectItem(json_entry, "completed"));
         entry->desc = strdup(cJSON_GetObjectItem(json_entry, "desc")->valuestring);
         entry->date = strdup(cJSON_GetObjectItem(json_entry, "date")->valuestring);
         entry->priority = cJSON_GetObjectItem(json_entry, "priority")->valueint;
+        entry->editing = false;
+        entry->edit_input = (LfInputField){
+            .width = 400,
+            .buf = malloc(INPUT_BUF_SIZE),
+            .buf_size = INPUT_BUF_SIZE,
+            .placeholder = "Edit description"};
+        strcpy(entry->edit_input.buf, entry->desc);
         entries[i] = entry;
     }
 
@@ -112,26 +185,26 @@ void load_entries_from_json(const char *filename) {
     free(data);
 }
 
-
-
-char* get_command_output(const char* cmd) {
+char *get_command_output(const char *cmd)
+{
     FILE *fp;
     char buffer[INPUT_BUF_SIZE];
     char *result = NULL;
     size_t result_size = 0;
 
-    // Opening a new pipe with the fiven command
     fp = popen(cmd, "r");
-    if (fp == NULL) {
+    if (fp == NULL)
+    {
         printf("Failed to run command\n");
         return NULL;
     }
 
-    // Reading the output
-    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+    while (fgets(buffer, sizeof(buffer), fp) != NULL)
+    {
         size_t buffer_len = strlen(buffer);
         char *temp = realloc(result, result_size + buffer_len + 1);
-        if (temp == NULL) {
+        if (temp == NULL)
+        {
             printf("Memory allocation failed\n");
             free(result);
             pclose(fp);
@@ -145,18 +218,20 @@ char* get_command_output(const char* cmd) {
     return result;
 }
 
-static int compare_entry_priority(const void* a, const void* b)
+static int compare_entry_priority(const void *a, const void *b)
 {
-    todo_entry* entry_a = *(todo_entry**)a;
-    todo_entry* entry_b = *(todo_entry**)b;
+    todo_entry *entry_a = *(todo_entry **)a;
+    todo_entry *entry_b = *(todo_entry **)b;
     return (entry_b->priority - entry_a->priority);
 }
 
-static void sort_entries_by_priority(todo_entry** entries){
-    qsort(entries, numEntries, sizeof(todo_entry*), compare_entry_priority);
+static void sort_entries_by_priority(todo_entry **entries)
+{
+    qsort(entries, numEntries, sizeof(todo_entry *), compare_entry_priority);
 }
 
-static void rendertopbar() {
+static void rendertopbar()
+{
     lf_push_font(&titlefont);
     {
         LfUIElementProps props = lf_get_theme().text_props;
@@ -165,7 +240,7 @@ static void rendertopbar() {
         lf_pop_style_props();
     }
     lf_pop_font();
-    
+
     const float width = 160.0f;
 
     lf_set_ptr_x_absolute(WIN_INIT_W - width - GLOBAL_MARGIN * 2.0f);
@@ -178,16 +253,18 @@ static void rendertopbar() {
 
     lf_push_style_props(props);
     lf_set_line_should_overflow(false);
-    if(lf_button_fixed("New task", width, -1) == LF_CLICKED){
+    if (lf_button_fixed("New task", width, -1) == LF_CLICKED)
+    {
         current_tab = TAB_NEW_TASK;
     }
     lf_set_line_should_overflow(true);
     lf_pop_style_props();
 }
 
-static void renderfilters() {
+static void renderfilters()
+{
     uint32_t numfilters = 6;
-    static const char* filters[] = {"ALL", "IN PROGRESS", "COMPLETED", "LOW", "MEDIUM", "HIGH"};
+    static const char *filters[] = {"ALL", "IN PROGRESS", "COMPLETED", "LOW", "MEDIUM", "HIGH"};
 
     LfUIElementProps props = lf_get_theme().button_props;
     props.margin_top = 30.0f;
@@ -205,7 +282,8 @@ static void renderfilters() {
     lf_set_no_render(true);
     lf_set_ptr_y_absolute(lf_get_ptr_y() + 50.0f);
 
-    for (uint32_t i = 0; i < numfilters; i++) {
+    for (uint32_t i = 0; i < numfilters; i++)
+    {
         lf_button(filters[i]);
     }
     lf_set_no_render(false);
@@ -215,20 +293,22 @@ static void renderfilters() {
     lf_set_ptr_x_absolute(WIN_INIT_W - width - GLOBAL_MARGIN);
 
     lf_set_line_should_overflow(false);
-    for (uint32_t i = 0; i < numfilters; i++) {
+    for (uint32_t i = 0; i < numfilters; i++)
+    {
         props.color = (current_filter == i) ? (LfColor){255, 255, 255, 50} : LF_NO_COLOR;
         lf_push_style_props(props);
-        if (lf_button(filters[i]) == LF_CLICKED) {
+        if (lf_button(filters[i]) == LF_CLICKED)
+        {
             current_filter = (todo_filter)i;
         }
         lf_pop_style_props();
     }
     lf_set_line_should_overflow(true);
-    lf_pop_style_props();  // Restaurar el estilo después de terminar los filtros
+    lf_pop_style_props(); // Restaurar el estilo después de terminar los filtros
 }
 
 static void renderentries()
-{ 
+{
     lf_div_begin(((vec2s){lf_get_ptr_x(), lf_get_ptr_y()}), ((vec2s){WIN_INIT_W - lf_get_ptr_x() - GLOBAL_MARGIN, WIN_INIT_H - lf_get_ptr_y() - GLOBAL_MARGIN}), true);
 
     uint32_t renderedcount = 0;
@@ -236,12 +316,17 @@ static void renderentries()
 
     for (uint32_t i = 0; i < numEntries; i++)
     {
-        todo_entry* entry = entries[i];
-        if(current_filter == FILTER_LOW && entry->priority != PRIORITY_LOW) continue;
-        if(current_filter == FILTER_MEDIUM && entry->priority != PRIORITY_MEDIUM) continue;
-        if(current_filter == FILTER_HIGH && entry->priority != PRIORITY_HIGH) continue;
-        if(current_filter == FILTER_COMPLETED && !entry->completed) continue;
-        if(current_filter == FILTER_IN_PROGRESS && entry->completed) continue;
+        todo_entry *entry = entries[i];
+        if (current_filter == FILTER_LOW && entry->priority != PRIORITY_LOW)
+            continue;
+        if (current_filter == FILTER_MEDIUM && entry->priority != PRIORITY_MEDIUM)
+            continue;
+        if (current_filter == FILTER_HIGH && entry->priority != PRIORITY_HIGH)
+            continue;
+        if (current_filter == FILTER_COMPLETED && !entry->completed)
+            continue;
+        if (current_filter == FILTER_IN_PROGRESS && entry->completed)
+            continue;
         lf_set_ptr_x_absolute(start_x);
         float priority_size = 15.0f;
         float ptry_before = lf_get_ptr_y();
@@ -250,28 +335,35 @@ static void renderentries()
 
         bool clicked_priority = lf_hovered((vec2s){lf_get_ptr_x(), lf_get_ptr_y()}, (vec2s){priority_size, priority_size}) && lf_mouse_button_went_down(GLFW_MOUSE_BUTTON_LEFT);
 
-        if(clicked_priority){
-            if(entry->priority + 1 >= PRIORITY_HIGH + 1){
+        if (clicked_priority)
+        {
+            if (entry->priority + 1 >= PRIORITY_HIGH + 1)
+            {
                 entry->priority = 0;
-            } else {
+            }
+            else
+            {
                 entry->priority++;
             }
             sort_entries_by_priority(entries);
         }
         switch (entry->priority)
         {
-            case PRIORITY_LOW:{
-                lf_rect(priority_size, priority_size, (LfColor){75, 175, 80, 255}, 4.0f);
-                break;
-            }
-            case PRIORITY_MEDIUM:{
-                lf_rect(priority_size, priority_size, (LfColor){255, 235, 59, 255}, 4.0f);
-                break;
-            }
-            case PRIORITY_HIGH:{
-                lf_rect(priority_size, priority_size, (LfColor){244, 67, 54, 255}, 4.0f);
-                break;
-            }
+        case PRIORITY_LOW:
+        {
+            lf_rect(priority_size, priority_size, (LfColor){75, 175, 80, 255}, 4.0f);
+            break;
+        }
+        case PRIORITY_MEDIUM:
+        {
+            lf_rect(priority_size, priority_size, (LfColor){255, 235, 59, 255}, 4.0f);
+            break;
+        }
+        case PRIORITY_HIGH:
+        {
+            lf_rect(priority_size, priority_size, (LfColor){244, 67, 54, 255}, 4.0f);
+            break;
+        }
         }
         lf_set_ptr_y_absolute(ptry_before);
 
@@ -283,14 +375,15 @@ static void renderentries()
             props.margin_top = 0.0f;
             props.margin_left = 10.0f;
             lf_push_style_props(props);
-            if(lf_image_button(((LfTexture){.id = removeTexture.id, .width = 20, .height = 20})) == LF_CLICKED)
+            if (lf_image_button(((LfTexture){.id = removeTexture.id, .width = 20, .height = 20})) == LF_CLICKED)
             {
-                for(uint32_t j = i; j < numEntries - 1; j++)
+                for (uint32_t j = i; j < numEntries - 1; j++)
                 {
                     entries[j] = entries[j + 1];
                 }
                 numEntries--;
             }
+
             lf_pop_style_props();
         }
 
@@ -303,8 +396,8 @@ static void renderentries()
             props.margin_left = 10.0f;
             props.color = lf_color_from_zto((vec4s){0.05f, 0.05f, 0.05f, 1.0f});
             lf_push_style_props(props);
-            if(lf_checkbox("", &entry->completed, LF_NO_COLOR, ((LfColor){65, 167, 204, 255})) == LF_CLICKED){
-
+            if (lf_checkbox("", &entry->completed, LF_NO_COLOR, ((LfColor){65, 167, 204, 255})) == LF_CLICKED)
+            {
             }
             lf_pop_style_props();
         }
@@ -317,42 +410,9 @@ static void renderentries()
 
         float descprt_x = lf_get_ptr_x();
         float descprt_y = lf_get_ptr_y();
-        
-        if (entry->editing) {
-            LfUIElementProps input_props = lf_get_theme().inputfield_props;
-            input_props.padding = 5.0f;
-            input_props.border_width = 1.0f;
-            input_props.color = BACKGROUND_COLOR;
-            input_props.corner_radius = 2.5f;
-            input_props.text_color = LF_WHITE;
-            input_props.border_color = entry->edit_input.selected ? LF_WHITE : (LfColor){170, 170, 170, 255};
-            input_props.margin_top = 0.0f;
-            lf_push_style_props(input_props);
-            
-            lf_set_ptr_x_absolute(descprt_x);
-            lf_set_ptr_y_absolute(descprt_y);
-            
-            entry->edit_input.width = WIN_INIT_W - descprt_x - GLOBAL_MARGIN * 2;
-            
-            lf_input_text(&entry->edit_input);
-            lf_pop_style_props();
 
-            if (lf_key_went_down(GLFW_KEY_ENTER)) {
-                entry->editing = false;
-                // Allocate new memory for the updated description
-                free(entry->desc);
-                entry->desc = strdup(entry->edit_input.buf);
-            } else if (lf_key_went_down(GLFW_KEY_ESCAPE)) {
-                entry->editing = false;
-                strcpy(entry->edit_input.buf, entry->desc);  // Restore original text
-            }
-        } else {
-            if (lf_button(entry->desc) == LF_CLICKED) {
-                entry->editing = true;
-                strcpy(entry->edit_input.buf, entry->desc);
-                entry->edit_input.cursor_index = strlen(entry->desc);
-            }
-        }
+        // Replace the existing editing logic with:
+        handle_entry_edit(entry);
 
         // Render the date
         lf_set_ptr_x_absolute(descprt_x);
@@ -365,20 +425,19 @@ static void renderentries()
 
         lf_next_line();
         lf_set_ptr_y_absolute(lf_get_ptr_y() + 10.0f);
-        
-        renderedcount++;
-    } 
 
-    if(!renderedcount){
+        renderedcount++;
+    }
+
+    if (!renderedcount)
+    {
         lf_text("There is no task here.");
     }
     lf_div_end();
 }
 
-
-
-static void rendernewtask(){
-    
+static void rendernewtask()
+{
 
     lf_push_font(&titlefont);
     {
@@ -414,18 +473,16 @@ static void rendernewtask(){
 
     lf_next_line();
 
-    
     {
         lf_push_font(&smallfont);
         lf_text("Priority");
         lf_pop_font();
 
         lf_next_line();
-        static const char* items [3] = {
+        static const char *items[3] = {
             "Low",
             "Medium",
-            "High"
-        };
+            "High"};
         static bool opened = false;
         LfUIElementProps props = lf_get_theme().button_props;
         props.color = BACKGROUND_COLOR;
@@ -439,7 +496,7 @@ static void rendernewtask(){
 
     {
         bool form_complete = (strlen(new_task_input_buf) && selected_priority != -1);
-        const char* text = "Add";
+        const char *text = "Add";
         const float width = 150.0f;
 
         LfUIElementProps props = lf_get_theme().button_props;
@@ -452,58 +509,68 @@ static void rendernewtask(){
         lf_set_line_should_overflow(false);
         lf_set_ptr_x_absolute(WIN_INIT_W - (width + props.padding * 2.0f) - GLOBAL_MARGIN);
         lf_set_ptr_y_absolute(WIN_INIT_H - (lf_button_dimension(text).y + props.padding * 2.0f) - GLOBAL_MARGIN);
-        if(lf_button_fixed(text, width, -1) == LF_CLICKED || lf_key_went_down(GLFW_KEY_ENTER) && form_complete)
+
+        if (lf_button_fixed(text, width, -1) == LF_CLICKED || lf_key_went_down(GLFW_KEY_ENTER) && form_complete)
         {
-            todo_entry* entry = (todo_entry*)malloc(sizeof(*entry));
+            todo_entry *entry = (todo_entry *)malloc(sizeof(*entry));
             entry->priority = selected_priority;
             entry->completed = false;
             entry->date = get_command_output("date +\"%d.%m.%Y, %H:%M\"");
 
-            char* new_desc = malloc(strlen(new_task_input_buf));
+            char *new_desc = malloc(strlen(new_task_input_buf) + 1);
             strcpy(new_desc, new_task_input_buf);
+            
+            entry->desc = new_desc;
+            entry->editing = false;
+            entry->edit_input = (LfInputField){
+                .width = 400,
+                .buf = malloc(INPUT_BUF_SIZE),
+                .buf_size = INPUT_BUF_SIZE,
+                .placeholder = "Edit description"};
+            strcpy(entry->edit_input.buf, entry->desc);
 
-            entry->desc = new_desc;  
             entries[numEntries++] = entry;
             memset(new_task_input_buf, 0, INPUT_BUF_SIZE);
             new_task_input.cursor_index = 0;
             lf_input_field_unselect_all(&new_task_input);
             sort_entries_by_priority(entries);
         }
-        lf_set_line_should_overflow(true);
         lf_pop_style_props();
-    }
+        lf_next_line();
 
-    lf_next_line();
+        {
+            LfUIElementProps props = lf_get_theme().button_props;
+            props.color = LF_NO_COLOR;
+            props.border_width = 0.0f;
+            props.padding = 0.0f;
+            props.margin_left = 0.0f;
+            props.margin_top = 0.0f;
+            props.margin_right = 0.0f;
+            props.margin_bottom = 0.0f;
+            lf_push_style_props(props);
+            lf_set_line_should_overflow(false);
+            LfTexture backButton = (LfTexture){.id = backTexture.id, .width = 20, .height = 40};
+            lf_set_ptr_y_absolute(WIN_INIT_H - backButton.height - GLOBAL_MARGIN * 2.0f);
+            lf_set_ptr_x_absolute(GLOBAL_MARGIN);
 
-    {
-        LfUIElementProps props = lf_get_theme().button_props;
-        props.color = LF_NO_COLOR;
-        props.border_width = 0.0f;
-        props.padding = 0.0f;
-        props.margin_left = 0.0f;
-        props.margin_top = 0.0f;
-        props.margin_right = 0.0f;
-        props.margin_bottom = 0.0f;
-        lf_push_style_props(props);
-        lf_set_line_should_overflow(false);
-        LfTexture backButton = (LfTexture){.id = backTexture.id, .width = 20, .height = 40};
-        lf_set_ptr_y_absolute(WIN_INIT_H - backButton.height - GLOBAL_MARGIN * 2.0f);
-        lf_set_ptr_x_absolute(GLOBAL_MARGIN);
-
-        if(lf_image_button(backButton) == LF_CLICKED){
-            current_tab = TAB_DASHBOARD;
+            if (lf_image_button(backButton) == LF_CLICKED)
+            {
+                current_tab = TAB_DASHBOARD;
+            }
+            lf_set_line_should_overflow(true);
+            lf_pop_style_props();
         }
-        lf_set_line_should_overflow(true);
-        lf_pop_style_props();
     }
 }
 
-int main(int argc, char **argv) 
+int main(int argc, char **argv)
 {
     load_entries_from_json("todo_tasks.json");
     glfwInit();
-    GLFWwindow* window = glfwCreateWindow(WIN_INIT_W, WIN_INIT_H, "Todo", NULL, NULL);
+    GLFWwindow *window = glfwCreateWindow(WIN_INIT_W, WIN_INIT_H, "Todo", NULL, NULL);
 
+    glfwSetWindowAttrib(window, GLFW_RESIZABLE, GLFW_FALSE);
+    
     glfwMakeContextCurrent(window);
 
     lf_init_glfw(WIN_INIT_W, WIN_INIT_H, window);
@@ -512,49 +579,36 @@ int main(int argc, char **argv)
 
     removeTexture = lf_load_texture("./icons/remove.png", true, LF_TEX_FILTER_LINEAR);
     backTexture = lf_load_texture("./icons/back.png", true, LF_TEX_FILTER_LINEAR);
-    
+
     memset(new_task_input_buf, 0, INPUT_BUF_SIZE);
     new_task_input = (LfInputField){
         .width = 400,
         .buf = new_task_input_buf,
         .buf_size = INPUT_BUF_SIZE,
-        .placeholder = "What is there to do?"
-    };
+        .placeholder = "What is there to do?"};
 
-    // Initialize edit input fields for existing entries
-    for (uint32_t i = 0; i < numEntries; i++) {
-        entries[i]->edit_input = (LfInputField){
-            .width = 400,
-            .buf = malloc(INPUT_BUF_SIZE),
-            .buf_size = INPUT_BUF_SIZE,
-            .placeholder = "Edit description"
-        };
-        strcpy(entries[i]->edit_input.buf, entries[i]->desc);
-    }
-
-    while (!glfwWindowShouldClose(window)) {
-        // Move these lines here to ensure proper clearing of the entire window
+    while (!glfwWindowShouldClose(window))
+    {
         glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
         lf_begin();
-        
+
         lf_div_begin(((vec2s){GLOBAL_MARGIN, GLOBAL_MARGIN}), ((vec2s){WIN_INIT_W - GLOBAL_MARGIN * 2.0f, WIN_INIT_H - GLOBAL_MARGIN * 2.0f}), true);
 
-        switch(current_tab){
-            case TAB_DASHBOARD:{
-                rendertopbar();
-                lf_next_line();
-                renderfilters();
-                lf_next_line();
-                renderentries();
-                break;
-            }
-            
-            case TAB_NEW_TASK:{
-                rendernewtask();
-                break;
-            }
+        switch (current_tab)
+        {
+        case TAB_DASHBOARD:
+            rendertopbar();
+            lf_next_line();
+            renderfilters();
+            lf_next_line();
+            renderentries();
+            break;
+
+        case TAB_NEW_TASK:
+            rendernewtask();
+            break;
         }
 
         lf_div_end();
@@ -566,12 +620,17 @@ int main(int argc, char **argv)
 
     save_entries_to_json("todo_tasks.json");
 
-    // Free memory for edit input fields
-    for (uint32_t i = 0; i < numEntries; i++) {
+    // Cleanup
+    for (uint32_t i = 0; i < numEntries; i++)
+    {
+        free(entries[i]->desc);
+        free(entries[i]->date);
         free(entries[i]->edit_input.buf);
+        free(entries[i]);
     }
 
     lf_free_font(&titlefont);
+    lf_free_font(&smallfont);
     glfwDestroyWindow(window);
     glfwTerminate();
 
