@@ -12,7 +12,17 @@
 		"completed":	false,
 		"desc":	"adadad",
 		"date":	"15.07.2024, 01:41\n",
-		"priority":	0
+		"priority":	2
+	}, {
+		"completed":	false,
+		"desc":	"aaa",
+		"date":	"17.07.2024, 00:50\n",
+		"priority":	2
+	}, {
+		"completed":	false,
+		"desc":	"test realtime",
+		"date":	"17.07.2024, 00:32\n",
+		"priority":	1
 	}, {
 		"completed":	false,
 		"desc":	"selr",
